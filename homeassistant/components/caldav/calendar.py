@@ -9,6 +9,7 @@ from typing import Any
 
 import caldav
 from caldav.lib.error import DAVError
+from recurring_ical_events.types import RecurrenceID
 import requests
 import voluptuous as vol
 
@@ -39,7 +40,7 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import CalDavConfigEntry
-from .api import async_get_calendars
+from .api import async_get_calendars, get_attr_value
 from .coordinator import CalDavUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -181,7 +182,11 @@ async def async_setup_entry(
 class WebDavCalendarEntity(CoordinatorEntity[CalDavUpdateCoordinator], CalendarEntity):
     """A device for getting the next Task from a WebDav Calendar."""
 
-    _attr_supported_features = CalendarEntityFeature.CREATE_EVENT
+    _attr_supported_features = (
+        CalendarEntityFeature.CREATE_EVENT
+        | CalendarEntityFeature.DELETE_EVENT
+        | CalendarEntityFeature.UPDATE_EVENT
+    )
 
     def __init__(
         self,
@@ -210,6 +215,66 @@ class WebDavCalendarEntity(CoordinatorEntity[CalDavUpdateCoordinator], CalendarE
     ) -> list[CalendarEvent]:
         """Get all events in a specific time frame."""
         return await self.coordinator.async_get_events(hass, start_date, end_date)
+
+    async def async_update_event(
+        self,
+        uid: str,
+        event: dict[str, Any],
+        recurrence_id: str | None = None,
+        recurrence_range: str | None = None,
+    ) -> None:
+        """Update an existing event in the calendar."""
+        # Get the primary copy of the event with the rrule but no recurrence id
+        primary_event = await self.hass.async_add_executor_job(
+            partial(
+                self.coordinator.calendar.event_by_uid,
+                uid=uid,
+            )
+        )
+        # Overwrite any of the fields passed by the UI
+        for k, v in event.items():
+            getattr(primary_event.instance.vevent, k).value = v
+        # If this is a recurrence rather than the primary, set the recurrence id so we update the single recurrence instead of the entire series
+        _LOGGER.warning(
+            "Event update 1: %s||%s||%s||%s",
+            uid,
+            type(primary_event),
+            type(primary_event.instance.vevent),
+            vars(primary_event.instance.vevent),
+        )
+        if recurrence_id is not None:
+            primary_event.instance.vevent.recurrence_id = RecurrenceID.strptime(
+                recurrence_id, "%Y%m%dT%H%M%SZ"
+            )
+        _LOGGER.warning(
+            "Event update 2: %s||%s||%s||%s",
+            uid,
+            type(primary_event),
+            type(primary_event.instance.vevent),
+            vars(primary_event.instance.vevent),
+        )
+        try:
+            await self.hass.async_add_executor_job(
+                partial(
+                    primary_event.save,
+                    no_create=True,
+                    only_this_recurrence=True,
+                    all_recurrences=False,
+                ),
+            )
+        except (requests.ConnectionError, DAVError) as err:
+            raise HomeAssistantError(f"CalDAV save error: {err}") from err
+
+    async def async_delete_event(
+        self,
+        uid: str,
+        recurrence_id: str | None = None,
+        recurrence_range: str | None = None,
+    ) -> None:
+        """Delete an existing event in the calendar."""
+        _LOGGER.warning(
+            "Event delete: %s||%s||%s", uid, recurrence_id, recurrence_range
+        )
 
     async def async_create_event(self, **kwargs: Any) -> None:
         """Create a new event in the calendar."""

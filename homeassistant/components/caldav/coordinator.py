@@ -57,6 +57,28 @@ class CalDavUpdateCoordinator(DataUpdateCoordinator[CalendarEvent | None]):
     ) -> list[CalendarEvent]:
         """Get all events in a specific time frame."""
         # Get event list from the current calendar
+        rrule_map = {}
+        rrevent_list = await hass.async_add_executor_job(
+            partial(
+                self.calendar.search,
+                start=start_date,
+                end=end_date,
+                event=True,
+                expand=False,
+            )
+        )
+        for event in rrevent_list:
+            if not hasattr(event.instance, "vevent"):
+                _LOGGER.warning("Skipped event with missing 'vevent' property")
+                continue
+            vevent = event.instance.vevent
+            if not self.is_matching(vevent, self.search):
+                continue
+            if get_attr_value(vevent, "rrule") is not None:
+                rrule_map[str(get_attr_value(vevent, "uid"))] = str(
+                    get_attr_value(vevent, "rrule")
+                )
+        _LOGGER.warning("YYYY %s", rrule_map)
         vevent_list = await hass.async_add_executor_job(
             partial(
                 self.calendar.search,
@@ -74,6 +96,13 @@ class CalDavUpdateCoordinator(DataUpdateCoordinator[CalendarEvent | None]):
             vevent = event.instance.vevent
             if not self.is_matching(vevent, self.search):
                 continue
+            rrule = rrule_map.get(str(get_attr_value(vevent, "uid")), None)
+            rid = get_attr_value(vevent, "recurrence_id")
+            if rid is not None:
+                rid = rid.strftime("%Y%m%dT%H%M%SZ")
+            _LOGGER.warning(
+                "Vevent %s||%s||%s", type(event), type(vevent), vars(vevent)
+            )
             event_list.append(
                 CalendarEvent(
                     summary=get_attr_value(vevent, "summary") or "",
@@ -81,6 +110,9 @@ class CalDavUpdateCoordinator(DataUpdateCoordinator[CalendarEvent | None]):
                     end=self.to_local(self.get_end_date(vevent)),
                     location=get_attr_value(vevent, "location"),
                     description=get_attr_value(vevent, "description"),
+                    uid=get_attr_value(vevent, "uid"),
+                    rrule=rrule,
+                    recurrence_id=rid,
                 )
             )
 
