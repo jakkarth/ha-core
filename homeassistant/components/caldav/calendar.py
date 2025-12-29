@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import partial
 import logging
 from typing import Any
@@ -233,26 +233,14 @@ class WebDavCalendarEntity(CoordinatorEntity[CalDavUpdateCoordinator], CalendarE
         )
         # Overwrite any of the fields passed by the UI
         for k, v in event.items():
-            getattr(primary_event.instance.vevent, k).value = v
+            if isinstance(v, datetime):
+                v = v.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+            primary_event.component[k] = v
         # If this is a recurrence rather than the primary, set the recurrence id so we update the single recurrence instead of the entire series
-        _LOGGER.warning(
-            "Event update 1: %s||%s||%s||%s",
-            uid,
-            type(primary_event),
-            type(primary_event.instance.vevent),
-            vars(primary_event.instance.vevent),
-        )
         if recurrence_id is not None:
-            primary_event.instance.vevent.recurrence_id = RecurrenceID.strptime(
-                recurrence_id, "%Y%m%dT%H%M%SZ"
-            )
-        _LOGGER.warning(
-            "Event update 2: %s||%s||%s||%s",
-            uid,
-            type(primary_event),
-            type(primary_event.instance.vevent),
-            vars(primary_event.instance.vevent),
-        )
+            primary_event.component["recurrence-id"] = recurrence_id
+            primary_event.component.pop("rrule", None)
         try:
             await self.hass.async_add_executor_job(
                 partial(

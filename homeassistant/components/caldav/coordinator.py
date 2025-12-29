@@ -78,7 +78,6 @@ class CalDavUpdateCoordinator(DataUpdateCoordinator[CalendarEvent | None]):
                 rrule_map[str(get_attr_value(vevent, "uid"))] = str(
                     get_attr_value(vevent, "rrule")
                 )
-        _LOGGER.warning("YYYY %s", rrule_map)
         vevent_list = await hass.async_add_executor_job(
             partial(
                 self.calendar.search,
@@ -100,9 +99,6 @@ class CalDavUpdateCoordinator(DataUpdateCoordinator[CalendarEvent | None]):
             rid = get_attr_value(vevent, "recurrence_id")
             if rid is not None:
                 rid = rid.strftime("%Y%m%dT%H%M%SZ")
-            _LOGGER.warning(
-                "Vevent %s||%s||%s", type(event), type(vevent), vars(vevent)
-            )
             event_list.append(
                 CalendarEvent(
                     summary=get_attr_value(vevent, "summary") or "",
