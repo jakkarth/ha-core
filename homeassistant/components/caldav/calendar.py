@@ -9,6 +9,7 @@ from typing import Any
 
 import caldav
 from caldav.lib.error import DAVError
+from icalendar import vDatetime
 from recurring_ical_events.types import RecurrenceID
 import requests
 import voluptuous as vol
@@ -235,12 +236,17 @@ class WebDavCalendarEntity(CoordinatorEntity[CalDavUpdateCoordinator], CalendarE
         for k, v in event.items():
             if isinstance(v, datetime):
                 v = v.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
-
             primary_event.component[k] = v
         # If this is a recurrence rather than the primary, set the recurrence id so we update the single recurrence instead of the entire series
         if recurrence_id is not None:
-            primary_event.component["recurrence-id"] = recurrence_id
+            primary_event.component["recurrence-id"] = vDatetime(
+                datetime.strptime(recurrence_id, "%Y%m%dT%H%M%SZ")
+            )
             primary_event.component.pop("rrule", None)
+            if recurrence_range == "THISANDFUTURE":
+                primary_event.component["recurrence-id"].params["range"] = (
+                    "THISANDFUTURE"
+                )
         try:
             await self.hass.async_add_executor_job(
                 partial(
